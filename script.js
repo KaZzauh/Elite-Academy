@@ -35,14 +35,13 @@ let settings = {
     logo: '',
     color: '#0f766e',
     feeTypes: ['Tuition', 'Feeding', 'Transport', 'Uniform', 'Exam Fee'],
-    // Grade Boundaries
     gradeBoundaries: { A: 90, B: 80, C: 70, D: 60, F: 0 }
 };
 
 let currentUser = null;
 const charts = {};
 let selectedFeeStudentId = null;
-let selectedFeeTerm = null; // Remembers the term selected in Fee Collection
+let selectedFeeTerm = null;
 let pendingResultScores = null;
 let activeClassDetailId = null;
 let pendingClassGrades = null;
@@ -578,7 +577,7 @@ function seedData() {
     
     students.slice(0, 16).forEach((s, i) => {
         const struct = s.feeStructure;
-        const assignedTerm = seedTerms[i % 3]; // Spread across all 3 terms
+        const assignedTerm = seedTerms[i % 3]; 
         
         if (i === 0) {
             struct.forEach(f => {
@@ -881,9 +880,8 @@ function switchTab(id) {
     });
     closeSidebar();
 
-    // Titles removed as requested to keep the system clean
     const span = document.getElementById('pageTitleSpan');
-    if (span) span.textContent = ''; // Leaves the top bar empty and clean
+    if (span) span.textContent = '';
 
     if (id === 'dashboard') refreshDashboard();
     if (id === 'smartAnalytics') renderSmartAnalytics();
@@ -2191,7 +2189,6 @@ function renderFeeStructureEditor(student) {
         existingStruct = getStudentFeeStructure(student);
     }
 
-    // Build the list based on Global Types
     globalTypes.forEach(gType => {
         const existing = existingStruct.find(f => f.type.toLowerCase() === gType.toLowerCase());
         if (existing) {
@@ -2202,7 +2199,6 @@ function renderFeeStructureEditor(student) {
         }
     });
 
-    // Include any custom/old fee types the student had that aren't in the global list
     existingStruct.forEach(f => {
         if (!f._mapped) {
             struct.push({ type: f.type, expected: f.expected });
@@ -2379,8 +2375,6 @@ function renderClasses() {
     const sortedLevels = Object.keys(groups).sort((a, b) =>
         levelOrderRank(a) - levelOrderRank(b) || a.localeCompare(b)
     );
-
-    const levelIcons = { 'Nursery': '', 'Kindergarten': '', 'KG': '', 'Primary': '', 'Junior High School': '' };
 
     container.innerHTML = sortedLevels.map(lvl => {
         const list = groups[lvl].slice().sort(naturalCompareClass);
@@ -2678,7 +2672,7 @@ function toggleSubjectExamGroup(header) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ⭐ REPLACED FUNCTION — student performance report card
+// REPLACED FUNCTION — student performance report card
 // ═══════════════════════════════════════════════════════════════
 function showStudentPerformance(studentId, termId = 'all') {
     const s = students.find(x => x.id === studentId);
@@ -2933,7 +2927,6 @@ function showStudentPerformance(studentId, termId = 'all') {
                 </div>
             </div>
 
-            <!-- ═══ FRIEND'S SCORING BREAKDOWN LAYOUT (STATIC MAXIMUMS) ═══ -->
             <div class="friend-sb-container">
                 <div class="friend-sb-title"><i class="fas fa-calculator"></i> Scoring Breakdown</div>
                 <div class="friend-sb-row">
@@ -3094,7 +3087,6 @@ function showStudentPerformance(studentId, termId = 'all') {
         });
     }
 }
-// ═══════════════════════════════════════════════════════════════
 
 function gradeExamFromClass(examId, classId, subjectId) {
     const exam = exams.find(e => e.id === examId);
@@ -4742,15 +4734,12 @@ function renderFeePanel() {
         const t = typeSel.value === '__custom' ? '' : typeSel.value;
         customInp.style.display = typeSel.value === '__custom' ? 'block' : 'none';
         
-        // Always leave the amount field blank (shows placeholder 0.00) 
-        // so the user has to manually type the amount they are collecting
         amountInp.value = ''; 
     }
     refreshAmount();
 
     typeSel.addEventListener('change', refreshAmount);
     
-    // Save term selection when changed
     document.getElementById('feeTerm').addEventListener('change', function() {
         selectedFeeTerm = this.value;
     });
@@ -5367,7 +5356,6 @@ function renderSettings() {
     document.getElementById('setColor').value = settings.color;
     document.getElementById('colorHex').textContent = settings.color;
 
-    // Populate Grade Boundaries
     const gb = settings.gradeBoundaries || { A: 90, B: 80, C: 70, D: 60, F: 0 };
     if(document.getElementById('gradeA')) {
         document.getElementById('gradeA').value = gb.A;
@@ -5466,7 +5454,6 @@ function saveGradeBoundaries() {
     settings.gradeBoundaries = { A: a, B: b, C: c, D: d, F: f };
     saveSettings();
     
-    // ✨ NEW: Recalculate all existing grades in the database
     let updatedCount = 0;
     grades.forEach(g => {
         const newGradeData = calcGrade(Number(g.percent));
@@ -5477,7 +5464,6 @@ function saveGradeBoundaries() {
         }
     });
     
-    // Save the updated grades back to storage
     if (updatedCount > 0) {
         saveAll();
     }
@@ -5880,6 +5866,7 @@ window.deleteGlobalFeeType = deleteGlobalFeeType;
 window.addGlobalFeeType = addGlobalFeeType;
 
 // ─── SAFETY NET: Bind login form at module load ───
+// Guarantees the form submits even if init() throws.
 function bindLoginSafe() {
     const form = document.getElementById('loginForm');
     if (!form || form.__loginBound) return;
@@ -5890,15 +5877,19 @@ function bindLoginSafe() {
         const p = (document.getElementById('loginPassword').value || '').trim();
         const err = document.getElementById('loginError');
         if (!u || !p) { if (err) err.textContent = 'Please enter both username and password.'; return; }
+        
+        // Wait for bridge to have pulled cloud data
         if (window.SupabaseBridge && !window.__bridgeReady) {
             if (err) err.textContent = '⏳ Connecting to cloud, please wait…';
             window.addEventListener('bridge:ready', () => form.requestSubmit(), { once: true });
             return;
         }
+
         if (typeof users === 'undefined' || !Array.isArray(users)) {
             if (err) err.textContent = '❌ App not initialized. Please refresh.';
             return;
         }
+
         const user = users.find(x => x.username && x.username.toLowerCase() === u.toLowerCase() && x.password === p);
         if (!user) { if (err) err.textContent = '❌ Invalid username or password.'; return; }
         if (err) err.textContent = '';
@@ -5912,4 +5903,10 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', bindLoginSafe);
 } else {
     bindLoginSafe();
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
 }
