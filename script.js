@@ -389,6 +389,7 @@ function roleAllowed(tabId) {
 
 // ─── SEED DEMO DATA ───
 function seedData() {
+     return; // <--- ADD THIS LINE
     classes = [
         { id: uid('CL'), name: 'Creche',     level: 'Creche',      section: 'A', teacherId: '', teacherName: '', capacity: 15, fee: 200, status: 'Active' },
         { id: uid('CL'), name: 'Nursery 1',  level: 'Nursery',     section: 'A', teacherId: '', teacherName: 'Ustadha Maryam',  capacity: 25, fee: 250, status: 'Active' },
