@@ -819,11 +819,25 @@ function initLogin() {
         const u = document.getElementById('loginUsername').value.trim();
         const p = document.getElementById('loginPassword').value.trim();
         const err = document.getElementById('loginError');
-        const user = users.find(x => x.username.toLowerCase() === u.toLowerCase() && x.password === p);
-        if (!user) { err.textContent = '❌ Invalid username or password.'; return; }
-        err.textContent = '';
+        
+        // Wait for Supabase bridge to finish loading cloud data
+        if (window.SupabaseBridge && !window.__bridgeReady) {
+            if (err) err.textContent = '⏳ Connecting to cloud, please wait…';
+            window.addEventListener('bridge:ready', () => form.requestSubmit(), { once: true });
+            return;
+        }
+
+        if (typeof users === 'undefined' || !Array.isArray(users)) {
+            if (err) err.textContent = '❌ App not initialized. Please refresh.';
+            return;
+        }
+
+        const user = users.find(x => x.username && x.username.toLowerCase() === u.toLowerCase() && x.password === p);
+        if (!user) { if (err) err.textContent = '❌ Invalid username or password.'; return; }
+        
+        if (err) err.textContent = '';
         currentUser = user;
-        localStorage.setItem(AUTH_KEY, JSON.stringify({ id: user.id }));
+        try { localStorage.setItem(AUTH_KEY, JSON.stringify({ id: user.id })); } catch(_) {}
         enterApp();
         toast('Welcome back, ' + user.name + '!', 'success');
     });
@@ -1725,7 +1739,6 @@ function renderSmartAnalytics() {
     });
 }
 
-/* ─── Sub-renderers for Analytics ─── */
 function renderSA_ExamKPIs() {
     const el = document.getElementById('saExamKPIs');
     if (!el) return;
@@ -2462,7 +2475,6 @@ function renderClassMiniCard(c) {
     `;
 }
 
-// ─── CLASS DETAIL ───
 function viewClassDetail(classId) {
     const c = classes.find(x => x.id === classId);
     if (!c) return;
@@ -3039,7 +3051,6 @@ function showStudentPerformance(studentId, termId = 'all') {
         </div>
     `;
 
-    // ── 14. Mount modal ──
     const existing = document.querySelector('.modal-overlay[data-perf-modal]');
     if (existing) existing.remove();
 
@@ -3050,7 +3061,6 @@ function showStudentPerformance(studentId, termId = 'all') {
     modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
     document.body.appendChild(modal);
 
-    // ── 15. Wire the term filter ──
     const termSel = document.getElementById('perfTermSelect');
     if (termSel) {
         termSel.addEventListener('change', function () {
@@ -3058,7 +3068,6 @@ function showStudentPerformance(studentId, termId = 'all') {
         });
     }
 
-    // ── 16. Subject chart ──
     const ctx = document.getElementById('reportCardChart');
     if (ctx) {
         const labels = Object.keys(subjectsMap);
@@ -5864,46 +5873,6 @@ window.toggleSubjectExamGroup = toggleSubjectExamGroup;
 window.backToLevels = backToLevels;
 window.deleteGlobalFeeType = deleteGlobalFeeType;
 window.addGlobalFeeType = addGlobalFeeType;
-
-// ─── SAFETY NET: Bind login form at module load ───
-// Guarantees the form submits even if init() throws.
-function bindLoginSafe() {
-    const form = document.getElementById('loginForm');
-    if (!form || form.__loginBound) return;
-    form.__loginBound = true;
-    form.addEventListener('submit', function (e) {
-        e.preventDefault();
-        const u = (document.getElementById('loginUsername').value || '').trim();
-        const p = (document.getElementById('loginPassword').value || '').trim();
-        const err = document.getElementById('loginError');
-        if (!u || !p) { if (err) err.textContent = 'Please enter both username and password.'; return; }
-        
-        // Wait for bridge to have pulled cloud data
-        if (window.SupabaseBridge && !window.__bridgeReady) {
-            if (err) err.textContent = '⏳ Connecting to cloud, please wait…';
-            window.addEventListener('bridge:ready', () => form.requestSubmit(), { once: true });
-            return;
-        }
-
-        if (typeof users === 'undefined' || !Array.isArray(users)) {
-            if (err) err.textContent = '❌ App not initialized. Please refresh.';
-            return;
-        }
-
-        const user = users.find(x => x.username && x.username.toLowerCase() === u.toLowerCase() && x.password === p);
-        if (!user) { if (err) err.textContent = '❌ Invalid username or password.'; return; }
-        if (err) err.textContent = '';
-        currentUser = user;
-        try { localStorage.setItem(AUTH_KEY, JSON.stringify({ id: user.id })); } catch(_) {}
-        if (typeof enterApp === 'function') enterApp();
-        if (typeof toast === 'function') toast('Welcome back, ' + user.name + '!', 'success');
-    });
-}
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bindLoginSafe);
-} else {
-    bindLoginSafe();
-}
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
