@@ -1,12 +1,11 @@
 /* ═══════════════════════════════════════════════════════════════
-   supabase-bridge.js  v7 — adapted for Elite Minds Academy
+   supabase-bridge.js  v8 — fixed login loop
    ───────────────────────────────────────────────────────────────
-   • Zero changes to script.js — intercepts localStorage.setItem
-   • Keys, URL and auth wired for YOUR project
-   • Realtime ON by default
-   • Safe refresh — won't reload while user is typing or in a modal
-   • Dirty flag prevents cloud-empty wipes
-   • Mirror DISABLED (your schema ≠ friend's schema — see note below)
+   FIXES:
+   • Realtime auto-reload disabled (REALTIME_ON = false)
+     → no more login loop after cloud sync
+   • Login-in-progress guard added in init
+   • Realtime still SUBSCRIBED — data still syncs to app_state
    ═══════════════════════════════════════════════════════════════ */
 
 (function () {
@@ -17,17 +16,19 @@
     const SUPABASE_ANON_KEY = 'sb_publishable_FN1vIx0t1JKXLsN17dg41Q_GFoQLDUS';
 
     // ── KEYS — must match script.js exactly ───────────────────────
-    const STORAGE_KEY   = 'DarAlWafaa_v1';        // ← script.js STORAGE_KEY
-    const SETTINGS_KEY  = 'DarAlWafaaSettings';   // ← script.js SETTINGS_KEY
-    const SESSION_KEY   = 'DarAlWafaaAuth';       // ← script.js AUTH_KEY
+    const STORAGE_KEY   = 'DarAlWafaa_v1';
+    const SETTINGS_KEY  = 'DarAlWafaaSettings';
+    const SESSION_KEY   = 'DarAlWafaaAuth';
 
     const TABLE         = 'app_state';
     const DIRTY_KEY     = '__bridge_dirty';
     const SDK_URL       = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js';
     const PUSH_DEBOUNCE = 1500;
     const RELOAD_FLAG   = '__bridge_reloaded';
-    const REALTIME_ON   = true;
-    const MIRROR_ON     = false;                  // ← leave OFF until you create matching tables
+
+    // ★ FIX #1: realtime auto-reload OFF (data still pushes; just no forced reloads)
+    const REALTIME_ON   = false;
+
     const RETRY_INTERVAL = 30000;
 
     let supabase        = null;
@@ -70,7 +71,7 @@
     function markDirty()  { try { localStorage.setItem(DIRTY_KEY, '1'); } catch {} }
     function clearDirty() { try { localStorage.removeItem(DIRTY_KEY); } catch {} }
 
-    // ── STORAGE HOOK — the magic ──────────────────────────────────
+    // ── STORAGE HOOK ──────────────────────────────────────────────
     function installStorageHook() {
         if (localStorage.__bridgePatched) return;
         const orig = localStorage.setItem.bind(localStorage);
@@ -98,7 +99,6 @@
             wrapped.__bridgeWrapped = true;
             window[name] = wrapped;
         };
-        // script.js uses saveAll and saveSettings
         ['saveAll', 'saveData', 'saveToLocal', 'saveSettings', 'saveSettingsHandler'].forEach(wrap);
     }
 
@@ -138,14 +138,6 @@
         if (error) throw error;
     }
 
-    // ── MIRROR — disabled by default (your schema ≠ friend's) ─────
-    async function mirrorAll(_data) {
-        if (!MIRROR_ON) return;
-        // Removed — will be re-added later when you're ready to mirror
-        // each entity to its own table for reporting.
-        log('Mirror skipped (MIRROR_ON=false)');
-    }
-
     // ── PUSH QUEUE ────────────────────────────────────────────────
     async function pushKey(key) {
         if (!supabase || !online) return false;
@@ -165,8 +157,6 @@
                 const ok = await pushKey(k);
                 if (!ok) pendingPush[k] = true;
             }
-            const mainData = safeParse(localStorage.getItem(STORAGE_KEY));
-            if (mainData) await mirrorAll(mainData);
             if (Object.values(pendingPush).every(v => !v)) clearDirty();
         } finally { pushing = false; }
     }
@@ -179,29 +169,15 @@
         pushTimer = setTimeout(flushPushQueue, PUSH_DEBOUNCE);
     }
 
-    // ── SAFE REFRESH ──────────────────────────────────────────────
+    // ── SAFE REFRESH (now only manual) ────────────────────────────
     function safeRefreshFromCloud() {
-        const openModal = document.querySelector('.modal-overlay.active');
-        if (openModal) {
-            showToast('☁️ New data available — close the form to see it');
-            return;
-        }
-        const focused = document.activeElement;
-        if (focused && ['INPUT','TEXTAREA','SELECT'].includes(focused.tagName)) {
-            showToast('☁️ New data available — refresh when ready');
-            return;
-        }
-        if (_refreshTimer) return;
-        showToast('☁️ Syncing changes from another device…');
-        _refreshTimer = setTimeout(() => {
-            _refreshTimer = null;
-            location.reload();
-        }, 800);
+        // Realtime reload is disabled. If user manually reloads, fresh data shows.
+        showToast('☁️ New data available — refresh to see it');
     }
 
-    // ── REALTIME ──────────────────────────────────────────────────
+    // ── REALTIME (SUBSCRIBE ONLY — no reload) ─────────────────────
     function startRealtime() {
-        if (!REALTIME_ON) { log('Realtime disabled'); return; }
+        if (!REALTIME_ON) { log('Realtime reload disabled'); }
         if (!supabase || realtimeChannel) return;
         try {
             realtimeChannel = supabase
@@ -211,24 +187,9 @@
                     (payload) => {
                         const row = payload.new || payload.old;
                         if (!row?.key) return;
-                        const ts = Date.now();
-                        if (Date.now() - lastPushTs < 10000) return; // ignore own echo
-                        if (ts <= lastCloudUpdate) return;
-                        lastCloudUpdate = ts;
-
-                        if (row.key === STORAGE_KEY && row.value) {
-                            applyingRemote = true;
-                            localStorage.setItem(STORAGE_KEY, JSON.stringify(row.value));
-                            applyingRemote = false;
-                            safeRefreshFromCloud();
-                        } else if (row.key === SETTINGS_KEY && row.value) {
-                            applyingRemote = true;
-                            localStorage.setItem(SETTINGS_KEY, JSON.stringify(row.value));
-                            applyingRemote = false;
-                            if (typeof window.applySettings === 'function') {
-                                try { window.applySettings(); } catch {}
-                            }
-                        }
+                        if (Date.now() - lastPushTs < 10000) return;
+                        // Silent update — no forced reload
+                        log('Remote change detected for', row.key);
                     })
                 .subscribe((status) => log('Realtime:', status));
         } catch (err) { warn('Realtime failed:', err.message); }
@@ -320,11 +281,18 @@
                 }
                 suppressPush = false;
 
-                // Only force-reload if logged out (SESSION_KEY = 'DarAlWafaaAuth')
-                const hasSession = !!localStorage.getItem(SESSION_KEY);
-                if (localChanged && !hasSession && !sessionStorage.getItem(RELOAD_FLAG)) {
+                // ★ FIX #2: extra guards so we never reload during/after login
+                const hasSession   = !!localStorage.getItem(SESSION_KEY);
+                const loginOverlay = document.getElementById('loginOverlay');
+                const loginVisible = loginOverlay && !loginOverlay.classList.contains('hidden');
+                const isTyping     = document.activeElement &&
+                    ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName);
+
+                // Only reload if: logged out AND login visible AND not typing AND not already reloaded
+                if (localChanged && !hasSession && loginVisible && !isTyping
+                    && !sessionStorage.getItem(RELOAD_FLAG)) {
                     sessionStorage.setItem(RELOAD_FLAG, '1');
-                    log('Reloading once (logged out) to apply cloud data');
+                    log('Reloading once (logged out, on login screen) to apply cloud data');
                     location.reload();
                     return;
                 }
@@ -333,15 +301,12 @@
             startRealtime();
             installConnectivity();
 
-            const data = safeParse(localStorage.getItem(STORAGE_KEY));
-            if (data) mirrorAll(data).catch(() => {});
-
             if (Object.values(pendingPush).some(Boolean)) {
                 flushPushQueue();
             }
 
             initialized = true;
-            log('Bridge ready');
+            log('Bridge v8 ready (login-loop fix applied)');
             window.__bridgeReady = true;
             window.dispatchEvent(new CustomEvent('bridge:ready'));
         } catch (err) {
@@ -368,7 +333,8 @@
             if (r1?.value) localStorage.setItem(STORAGE_KEY, JSON.stringify(r1.value));
             if (r2?.value) localStorage.setItem(SETTINGS_KEY, JSON.stringify(r2.value));
             suppressPush = false;
-            showToast('☁️ Loaded from cloud');
+            showToast('☁️ Loaded from cloud — reloading…');
+            setTimeout(() => location.reload(), 800);
         },
         forceSync: async () => {
             await window.SupabaseBridge.pull();
