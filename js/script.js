@@ -1,4 +1,3 @@
-
 // ═══════════════════════════════════════════════════════════════
 // ELITE MINDS ACADEMY - SCHOOL MANAGEMENT SYSTEM — script.js
 // ═══════════════════════════════════════════════════════════════
@@ -5880,8 +5879,37 @@ window.backToLevels = backToLevels;
 window.deleteGlobalFeeType = deleteGlobalFeeType;
 window.addGlobalFeeType = addGlobalFeeType;
 
+// ─── SAFETY NET: Bind login form at module load ───
+function bindLoginSafe() {
+    const form = document.getElementById('loginForm');
+    if (!form || form.__loginBound) return;
+    form.__loginBound = true;
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        const u = (document.getElementById('loginUsername').value || '').trim();
+        const p = (document.getElementById('loginPassword').value || '').trim();
+        const err = document.getElementById('loginError');
+        if (!u || !p) { if (err) err.textContent = 'Please enter both username and password.'; return; }
+        if (window.SupabaseBridge && !window.__bridgeReady) {
+            if (err) err.textContent = '⏳ Connecting to cloud, please wait…';
+            window.addEventListener('bridge:ready', () => form.requestSubmit(), { once: true });
+            return;
+        }
+        if (typeof users === 'undefined' || !Array.isArray(users)) {
+            if (err) err.textContent = '❌ App not initialized. Please refresh.';
+            return;
+        }
+        const user = users.find(x => x.username && x.username.toLowerCase() === u.toLowerCase() && x.password === p);
+        if (!user) { if (err) err.textContent = '❌ Invalid username or password.'; return; }
+        if (err) err.textContent = '';
+        currentUser = user;
+        try { localStorage.setItem(AUTH_KEY, JSON.stringify({ id: user.id })); } catch(_) {}
+        if (typeof enterApp === 'function') enterApp();
+        if (typeof toast === 'function') toast('Welcome back, ' + user.name + '!', 'success');
+    });
+}
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', bindLoginSafe);
 } else {
-    init();
+    bindLoginSafe();
 }
