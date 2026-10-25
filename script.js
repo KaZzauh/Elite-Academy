@@ -387,7 +387,6 @@ function roleAllowed(tabId) {
     return roles.split(',').map(r => r.trim()).includes(currentUser.role);
 }
 
-
 function seedData() {
     // Dummy data permanently removed. 
     // The app will now start completely empty.
@@ -403,6 +402,7 @@ function seedData() {
     expenses = [];
     saveAll();
 }
+
 // ═══════════════════════════════════════════════════════════════
 // BRANDING
 // ═══════════════════════════════════════════════════════════════
@@ -2505,9 +2505,16 @@ function showStudentPerformance(studentId, termId = 'all') {
         const exam = termExams.find(e => e.id === g.examId);
         if (!exam) return;
 
-        if (!subjectsMap[g.subjectName]) {
-            subjectsMap[g.subjectName] = {
-                name: g.subjectName,
+        // 🟢 FIX: Recover missing subject name for older data
+        let subName = g.subjectName;
+        if (!subName) {
+            const matchedSub = subjects.find(s => s.id === g.subjectId);
+            subName = matchedSub ? matchedSub.name : (exam.subjectName || 'Unknown Subject');
+        }
+
+        if (!subjectsMap[subName]) {
+            subjectsMap[subName] = {
+                name: subName,
                 scores: { individual: 0, group: 0, class: 0, project: 0, exam: 0 },
                 maxes:  { individual: 0, group: 0, class: 0, project: 0, exam: 0 }
             };
@@ -2530,8 +2537,8 @@ function showStudentPerformance(studentId, termId = 'all') {
         }
 
         if (key) {
-            subjectsMap[g.subjectName].scores[key] += Number(g.score);
-            subjectsMap[g.subjectName].maxes[key]  += Number(g.max);
+            subjectsMap[subName].scores[key] += Number(g.score);
+            subjectsMap[subName].maxes[key]  += Number(g.max);
         }
     });
 
@@ -2587,11 +2594,19 @@ function showStudentPerformance(studentId, termId = 'all') {
     const classMates = students.filter(st => st.classId === s.classId && st.status === 'Active');
     Object.keys(subjectsMap).forEach(subName => {
         const ranked = classMates.map(st => {
-            const rows = grades.filter(g =>
-                g.studentId === st.id &&
-                g.subjectName === subName &&
-                termExams.some(e => e.id === g.examId)
-            );
+            const rows = grades.filter(g => {
+                if (g.studentId !== st.id) return false;
+                if (!termExams.some(e => e.id === g.examId)) return false;
+                
+                let gSubName = g.subjectName;
+                if (!gSubName) {
+                    const matchedSub = subjects.find(s => s.id === g.subjectId);
+                    const ex = termExams.find(e => e.id === g.examId);
+                    gSubName = matchedSub ? matchedSub.name : (ex?.subjectName || 'Unknown Subject');
+                }
+                return gSubName === subName;
+            });
+            
             let sba = 0, sbaMax = 0, exam = 0, examMax = 0;
             rows.forEach(g => {
                 const n = (g.examName || '').toLowerCase();
@@ -2892,8 +2907,12 @@ function showStudentPerformance(studentId, termId = 'all') {
 function gradeExamFromClass(examId, classId, subjectId) {
     const exam = exams.find(e => e.id === examId);
     const cls = classes.find(c => c.id === classId);
-    const sub = subjectId ? subjects.find(s => s.id === subjectId) : null;
     if (!exam) return;
+
+    // 🟢 FIX: Fallback to exam's subjectId if not passed in
+    const validSubId = subjectId || exam.subjectId || '';
+    const sub = validSubId ? subjects.find(s => s.id === validSubId) : null;
+    const finalSubName = sub ? sub.name : (exam.subjectName || '');
 
     const list = students.filter(s => s.classId === classId && s.status === 'Active');
     const max = exam.max || 100;
@@ -2910,7 +2929,7 @@ function gradeExamFromClass(examId, classId, subjectId) {
                 <table>
                     <thead><tr><th style="width:50px;">#</th><th>Student</th><th style="width:130px;">Score</th></tr></thead>
                     <tbody>
-                        ${list.map((s, i) => {
+                        ${list.length ? list.map((s, i) => {
                             const existing = grades.find(g =>
                                 g.examId === examId && g.studentId === s.id &&
                                 (!subjectId || g.subjectId === subjectId));
@@ -2924,7 +2943,14 @@ function gradeExamFromClass(examId, classId, subjectId) {
                                         min="0" max="${max}" step="0.5" /></td>
                                 </tr>
                             `;
-                        }).join('')}
+                        }).join('') : `
+                            <tr>
+                                <td colspan="3" style="text-align:center; padding: 20px; color: #e74c3c; font-weight: 600;">
+                                    <i class="fas fa-user-slash"></i> No active students found in this class.<br>
+                                    <span style="font-weight:normal; font-size:0.85rem; color:#7a8a87;">Please admit a student to this class first.</span>
+                                </td>
+                            </tr>
+                        `}
                     </tbody>
                 </table>
             </div>
@@ -2961,7 +2987,7 @@ function gradeExamFromClass(examId, classId, subjectId) {
                 examId, examName: exam.name,
                 studentId, studentName: stu ? stu.name : '',
                 classId, className: cls ? cls.name : '',
-                subjectId: subjectId || '', subjectName: sub ? sub.name : '',
+                subjectId: validSubId, subjectName: finalSubName, // <-- Use the fallback variables
                 score, max,
                 percent: percent.toFixed(1),
                 grade: g.grade, remarks: g.remark
@@ -4058,7 +4084,8 @@ function renderExamTableRow(exam, className) {
                        : statusLower === 'ongoing'  ? 'ongoing'
                        : 'upcoming';
 
-    const firstSub = classGrades.find(g => g.subjectId)?.subjectId || '';
+    // 🟢 FIX: Fallback to exam's subjectId first
+    const firstSub = exam.subjectId || classGrades.find(g => g.subjectId)?.subjectId || '';
     const maxScore = exam.max || 100;
 
     return `
