@@ -2312,7 +2312,23 @@ function saveStudent() {
         students.push(data);
         toast('Student admitted.', 'success');
     }
-    saveAll();
+    
+    saveAll(); // Saves to local storage and triggers the bridge
+
+    // 🟢 DIRECT RELATIONAL PUSH TO SUPABASE
+    if (window.SupabaseBridge && window.SupabaseBridge.client) {
+        window.SupabaseBridge.client.from('students').upsert({
+            id: data.id,
+            name: data.name,
+            code: data.code,
+            gender: data.gender,
+            dob: data.dob
+        }).then(({ error }) => {
+            if (error) console.error('Failed to save to students table:', error);
+            else console.log('Successfully saved directly to students table!');
+        });
+    }
+
     document.getElementById('studentModal').classList.remove('active');
     renderStudents();
     refreshDashboard();
