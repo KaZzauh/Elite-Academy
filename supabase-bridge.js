@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════
-   supabase-bridge.js  v12 — Elite Minds Academy
+   supabase-bridge.js  v13 — Elite Minds Academy
    ───────────────────────────────────────────────────────────────
-   • Instant Realtime Sync across devices
-   • Smart UI refresh (does not interrupt typing or modals)
+   • Instant Realtime Sync
+   • PARALLEL table syncing (fixes the 1-minute delay)
    ═══════════════════════════════════════════════════════════════ */
 
 (function () {
@@ -19,10 +19,8 @@
     const TABLE          = 'app_state';
     const DIRTY_KEY      = '__bridge_dirty';
     const SDK_URL        = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js';
-    const PUSH_DEBOUNCE  = 1500;
+    const PUSH_DEBOUNCE  = 500; // Reduced from 1500ms to 500ms for faster save
     const RELOAD_FLAG    = '__bridge_reloaded';
-    
-    // 🟢 REALTIME IS NOW ON
     const REALTIME_ON    = true;   
     const RETRY_INTERVAL = 30000;
 
@@ -135,6 +133,7 @@
         if (error) throw error;
     }
 
+    // 🟢 PARALLEL SYNC: Runs all 10 table updates at the exact same time
     async function syncToTables(blobData) {
         if (!supabase || !blobData) return;
         
@@ -144,23 +143,32 @@
             exams: 'exams', grades: 'grades', payments: 'payments', expenses: 'expenses'
         };
 
-        for (const [key, table] of Object.entries(TABLE_MAP)) {
+        const promises = Object.entries(TABLE_MAP).map(async ([key, table]) => {
             const arr = blobData[key];
-            if (!Array.isArray(arr)) continue;
+            if (!Array.isArray(arr)) return;
             
             try {
+                // 1. Handle Deletions
                 const { data: existing } = await supabase.from(table).select('id');
                 if (existing && existing.length > 0) {
                     const currentIds = arr.map(x => x.id);
                     const toDelete = existing.map(r => r.id).filter(id => !currentIds.includes(id));
-                    if (toDelete.length > 0) await supabase.from(table).delete().in('id', toDelete);
+                    if (toDelete.length > 0) {
+                        await supabase.from(table).delete().in('id', toDelete);
+                    }
                 }
+
+                // 2. Handle Insertions / Updates
                 if (arr.length > 0) {
                     const { error } = await supabase.from(table).upsert(arr);
                     if (error) console.warn(`[Bridge] Sync error for ${table}:`, error.message);
                 }
-            } catch (err) { console.warn(`[Bridge] Sync failed for ${table}:`, err.message); }
-        }
+            } catch (err) {
+                console.warn(`[Bridge] Sync failed for ${table}:`, err.message);
+            }
+        });
+
+        await Promise.all(promises); // Fire them all at once!
     }
 
     async function pushKey(key) {
@@ -168,7 +176,7 @@
         const parsed = safeParse(localStorage.getItem(key));
         if (parsed === null) return false;
 
-        // 🟢 SAFETY GUARD: Prevent wiping the cloud with empty data
+        // Safety Guard
         if (key === STORAGE_KEY) {
             const isEmpty = (!parsed.students || parsed.students.length === 0) && 
                             (!parsed.classes || parsed.classes.length === 0) && 
@@ -222,25 +230,19 @@
                         const row = payload.new || payload.old;
                         if (!row || !row.key) return;
                         
-                        // Ignore our own changes
                         if (Date.now() - lastPushTs < 3000) return; 
 
-                        log('Remote change detected:', row.key);
-
-                        // Don't interrupt if user is typing or a modal is open
                         const isTyping = document.activeElement && ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName);
                         const hasOpenModal = document.querySelector('.modal-overlay.active');
 
                         if (isTyping || hasOpenModal) {
                             console.warn('[Bridge] Deferred UI refresh because user is busy.');
-                            // We still update local storage silently so next render is fresh
                             suppressPush = true;
                             localStorage.setItem(row.key, JSON.stringify(row.value));
                             suppressPush = false;
                             return;
                         }
 
-                        // Fetch full state to ensure everything is synced perfectly
                         const [mainRow, settingsRow, usersRow] = await Promise.all([
                             cloudGet(STORAGE_KEY), cloudGet(SETTINGS_KEY), cloudGet(USERS_KEY)
                         ]);
@@ -255,17 +257,12 @@
                         suppressPush = false;
                         applyingRemote = false;
 
-                        // Re-render the UI smoothly
                         if (typeof window.loadAll === 'function') {
-                            window.loadAll(); // Reloads arrays into memory
-                            
+                            window.loadAll();
                             if (typeof window.applyBranding === 'function') window.applyBranding();
-                            
-                            // Re-render active tab
                             const activeNav = document.querySelector('.nav-item.active');
                             if (activeNav && typeof window.switchTab === 'function') {
-                                const currentTab = activeNav.getAttribute('data-tab');
-                                window.switchTab(currentTab);
+                                window.switchTab(activeNav.getAttribute('data-tab'));
                             }
                             showToast('🔄 Data updated from another device');
                         }
@@ -286,7 +283,6 @@
             showToast('📴 Offline — changes will sync later', true);
         });
         
-        // Mobile tab sleep fix: When returning to the tab, fetch latest immediately
         document.addEventListener('visibilitychange', async () => {
             if (document.visibilityState === 'visible' && online && supabase) {
                 const [mainRow] = await Promise.all([cloudGet(STORAGE_KEY)]);
