@@ -2323,7 +2323,8 @@ function renderClassStudents(classId) {
                 <h3>All Students in ${esc(cls.name)}</h3>
                 <span class="stc-count">${list.length}</span>
             </div>
-            <table>
+            <div class="table-wrapper" style="overflow-x: auto; width: 100%;">
+                <table>
                 <thead>
                     <tr>
                         <th style="width:50px;">#</th>
@@ -2353,7 +2354,8 @@ function renderClassStudents(classId) {
                         `;
                     }).join('')}
                 </tbody>
-            </table>
+                </table>
+            </div>
         </div>
     `;
 }
