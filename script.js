@@ -388,8 +388,6 @@ function roleAllowed(tabId) {
 }
 
 function seedData() {
-    // Dummy data permanently removed. 
-    // The app will now start completely empty.
     students = [];
     classes = [];
     subjects = [];
@@ -400,7 +398,7 @@ function seedData() {
     grades = [];
     payments = [];
     expenses = [];
-    saveAll();
+    // 🟢 REMOVED saveAll() so it doesn't overwrite the cloud
 }
 
 // ═══════════════════════════════════════════════════════════════
