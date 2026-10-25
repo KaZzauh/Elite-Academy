@@ -1,6 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════
-   supabase-bridge.js  v9 — Elite Minds Academy
+   supabase-bridge.js  v10 — Elite Minds Academy
    ───────────────────────────────────────────────────────────────
+   • Syncs the master JSON blob to individual relational tables
    • Syncs student data, settings, AND user passwords to Supabase
    • Realtime auto-reload is OFF (prevents login loops)
    ═══════════════════════════════════════════════════════════════ */
@@ -133,11 +134,61 @@
         if (error) throw error;
     }
 
+    // 🟢 NEW: Sync JSON Blob to Relational Tables
+    async function syncToTables(blobData) {
+        if (!supabase || !blobData) return;
+        
+        const TABLE_MAP = {
+            students: 'students', 
+            classes: 'classes', 
+            subjects: 'subjects',
+            staff: 'staff', 
+            attendance: 'attendance', 
+            staffAttendance: 'staff_attendance',
+            exams: 'exams', 
+            grades: 'grades', 
+            payments: 'payments', 
+            expenses: 'expenses'
+        };
+
+        for (const [key, table] of Object.entries(TABLE_MAP)) {
+            const arr = blobData[key];
+            if (!Array.isArray(arr)) continue;
+            
+            try {
+                // 1. Handle Deletions (if a student was deleted locally, delete in DB)
+                const { data: existing } = await supabase.from(table).select('id');
+                if (existing && existing.length > 0) {
+                    const currentIds = arr.map(x => x.id);
+                    const toDelete = existing.map(r => r.id).filter(id => !currentIds.includes(id));
+                    if (toDelete.length > 0) {
+                        await supabase.from(table).delete().in('id', toDelete);
+                    }
+                }
+
+                // 2. Handle Insertions / Updates
+                if (arr.length > 0) {
+                    const { error } = await supabase.from(table).upsert(arr);
+                    if (error) console.warn(`[Bridge] Sync error for ${table}:`, error.message);
+                }
+            } catch (err) {
+                console.warn(`[Bridge] Sync failed for ${table}:`, err.message);
+            }
+        }
+    }
+
     async function pushKey(key) {
         if (!supabase || !online) return false;
         const parsed = safeParse(localStorage.getItem(key));
         if (parsed === null) return false;
-        try { await cloudPut(key, parsed); return true; }
+        try { 
+            await cloudPut(key, parsed); 
+            // If we are pushing the main storage, also sync to individual tables
+            if (key === STORAGE_KEY) {
+                await syncToTables(parsed);
+            }
+            return true; 
+        }
         catch (err) { warn('pushKey', key, err.message); return false; }
     }
 
@@ -152,7 +203,9 @@
                 if (!ok) pendingPush[k] = true;
             }
             if (Object.values(pendingPush).every(v => !v)) clearDirty();
-        } finally { pushing = false; }
+        } finally {
+            pushing = false;
+        }
     }
 
     function schedulePush(key) {
@@ -165,20 +218,6 @@
 
     function startRealtime() {
         if (!REALTIME_ON) { log('Realtime reload disabled'); }
-        if (!supabase || realtimeChannel) return;
-        try {
-            realtimeChannel = supabase
-                .channel('app_state_changes')
-                .on('postgres_changes',
-                    { event: '*', schema: 'public', table: TABLE },
-                    (payload) => {
-                        const row = payload.new || payload.old;
-                        if (!row?.key) return;
-                        if (Date.now() - lastPushTs < 10000) return;
-                        log('Remote change detected (silent):', row.key);
-                    })
-                .subscribe((status) => log('Realtime:', status));
-        } catch (err) { warn('Realtime failed:', err.message); }
     }
 
     function installConnectivity() {
@@ -299,7 +338,7 @@
             if (Object.values(pendingPush).some(Boolean)) flushPushQueue();
 
             initialized = true;
-            log('Bridge v9 ready (users sync enabled)');
+            log('Bridge v10 ready (relational tables sync enabled)');
             window.__bridgeReady = true;
             window.dispatchEvent(new CustomEvent('bridge:ready'));
         } catch (err) {
@@ -317,29 +356,6 @@
             pendingPush[USERS_KEY]    = true;
             await flushPushQueue();
             showToast('☁️ Pushed to cloud');
-        },
-        pull: async () => {
-            const [r1, r2, r3] = await Promise.all([
-                cloudGet(STORAGE_KEY),
-                cloudGet(SETTINGS_KEY),
-                cloudGet(USERS_KEY)
-            ]);
-            suppressPush = true;
-            if (r1?.value) localStorage.setItem(STORAGE_KEY, JSON.stringify(r1.value));
-            if (r2?.value) localStorage.setItem(SETTINGS_KEY, JSON.stringify(r2.value));
-            if (r3?.value) localStorage.setItem(USERS_KEY, JSON.stringify(r3.value));
-            suppressPush = false;
-            showToast('☁️ Loaded from cloud');
-        },
-        forceSync: async () => {
-            await window.SupabaseBridge.pull();
-            await window.SupabaseBridge.push();
-            showToast('🔄 Full sync complete');
-        },
-        resetFlags: () => {
-            sessionStorage.removeItem(RELOAD_FLAG);
-            clearDirty();
-            showToast('🔄 Flags cleared');
         },
         status: () => ({
             initialized,
