@@ -1,9 +1,9 @@
 /* ═══════════════════════════════════════════════════════════════
-   supabase-bridge.js  v10 — Elite Minds Academy
+   supabase-bridge.js  v11 — Elite Minds Academy
    ───────────────────────────────────────────────────────────────
-   • Syncs the master JSON blob to individual relational tables
-   • Syncs student data, settings, AND user passwords to Supabase
-   • Realtime auto-reload is OFF (prevents login loops)
+   • Syncs JSON blob to individual relational tables
+   • Includes Safety Guard: Prevents empty devices from wiping 
+     the cloud database.
    ═══════════════════════════════════════════════════════════════ */
 
 (function () {
@@ -12,17 +12,17 @@
     const SUPABASE_URL      = 'https://kcfhqipelrxymxuekeem.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_FN1vIx0t1JKXLsN17dg41Q_GFoQLDUS';
 
-    const STORAGE_KEY   = 'DarAlWafaa_v1';        // main data
-    const SETTINGS_KEY  = 'DarAlWafaaSettings';   // school settings
-    const SESSION_KEY   = 'DarAlWafaaAuth';       // login session
-    const USERS_KEY     = 'DarAlWafaaUsers';      // user accounts
+    const STORAGE_KEY   = 'DarAlWafaa_v1';        
+    const SETTINGS_KEY  = 'DarAlWafaaSettings';   
+    const SESSION_KEY   = 'DarAlWafaaAuth';       
+    const USERS_KEY     = 'DarAlWafaaUsers';      
 
     const TABLE          = 'app_state';
     const DIRTY_KEY      = '__bridge_dirty';
     const SDK_URL        = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js';
     const PUSH_DEBOUNCE  = 1500;
     const RELOAD_FLAG    = '__bridge_reloaded';
-    const REALTIME_ON    = false;   // Keep OFF to prevent login loops
+    const REALTIME_ON    = false;   
     const RETRY_INTERVAL = 30000;
 
     let supabase        = null;
@@ -35,7 +35,6 @@
         [SETTINGS_KEY]: false,
         [USERS_KEY]:    false
     };
-    let realtimeChannel = null;
     let lastCloudUpdate = 0;
     let lastPushTs      = 0;
     let suppressPush    = false;
@@ -134,7 +133,6 @@
         if (error) throw error;
     }
 
-    // 🟢 NEW: Sync JSON Blob to Relational Tables
     async function syncToTables(blobData) {
         if (!supabase || !blobData) return;
         
@@ -156,7 +154,7 @@
             if (!Array.isArray(arr)) continue;
             
             try {
-                // 1. Handle Deletions (if a student was deleted locally, delete in DB)
+                // 1. Handle Deletions
                 const { data: existing } = await supabase.from(table).select('id');
                 if (existing && existing.length > 0) {
                     const currentIds = arr.map(x => x.id);
@@ -181,9 +179,21 @@
         if (!supabase || !online) return false;
         const parsed = safeParse(localStorage.getItem(key));
         if (parsed === null) return false;
+
+        // 🟢 SAFETY GUARD: Prevent wiping the cloud with empty data
+        if (key === STORAGE_KEY) {
+            const isEmpty = (!parsed.students || parsed.students.length === 0) && 
+                            (!parsed.classes || parsed.classes.length === 0) && 
+                            (!parsed.payments || parsed.payments.length === 0);
+            
+            if (isEmpty) {
+                console.warn('[Bridge] Prevented pushing empty data to cloud. Data is safe.');
+                return true; // Pretend it succeeded so it doesn't try to retry
+            }
+        }
+
         try { 
             await cloudPut(key, parsed); 
-            // If we are pushing the main storage, also sync to individual tables
             if (key === STORAGE_KEY) {
                 await syncToTables(parsed);
             }
@@ -338,7 +348,7 @@
             if (Object.values(pendingPush).some(Boolean)) flushPushQueue();
 
             initialized = true;
-            log('Bridge v10 ready (relational tables sync enabled)');
+            log('Bridge v11 ready (Safety Guard enabled)');
             window.__bridgeReady = true;
             window.dispatchEvent(new CustomEvent('bridge:ready'));
         } catch (err) {
