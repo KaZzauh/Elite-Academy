@@ -1257,7 +1257,11 @@ tbody tr:last-child td { border-bottom: none; }
     min-width: 34px;
     text-align: center;
 }
-.student-table-card table { width: 100%; border-collapse: collapse; }
+.student-table-card table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    min-width: 600px; /* Forces the table to be wide enough to read */
+}
 .student-table-card th {
     background: var(--accent-purple-tint);
     color: #4c1d95;
